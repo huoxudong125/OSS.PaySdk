@@ -19,17 +19,20 @@ using System.Net.Http;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using System.Xml;
+using OSS.Common.ComModels;
 using OSS.Common.ComModels.Enums;
 using OSS.Common.Encrypt;
-using OSS.Common.Modules;
+using OSS.Common.Plugs;
 using OSS.Common.Plugs.LogPlug;
-using OSS.Http;
 using OSS.Http.Extention;
 using OSS.Http.Mos;
 using OSS.PaySdk.Wx.SysTools;
 
 namespace OSS.PaySdk.Wx
 {
+    /// <summary>
+    ///  微信支付基类
+    /// </summary>
     public abstract class WxPayBaseApi
     {
         /// <summary>
@@ -82,8 +85,7 @@ namespace OSS.PaySdk.Wx
             Func<HttpResponseMessage, Task<T>> funcFormat = null, HttpClient client = null)
             where T : WxPayBaseResp, new()
         {
-            T t = default(T);
-            string errorKey = null;
+            var t = default(T);
             try
             {
                 var resp = await request.RestSend(client);
@@ -100,10 +102,10 @@ namespace OSS.PaySdk.Wx
             }
             catch (Exception ex)
             {
-                t = new T() {Ret = (int) ResultTypes.InnerError, Message = ex.Message};
-                errorKey= LogUtil.Error(string.Concat("基类请求出错，错误信息：", ex.Message), "RestCommon", ModuleNames.PayCenter);
+                var errorKey = LogUtil.Error(string.Concat("基类请求出错，错误信息：", ex.Message), "RestCommon", ModuleNames.PayCenter);
+                t = new T() { ret = -1, message = string.Concat("当前请求出错，错误码：", errorKey) };
             }
-            return t ?? new T() {Ret = 0,Message = string.Concat("当前请求出错，错误码：", errorKey) };
+            return t;
         }
 
         /// <summary>
@@ -117,7 +119,7 @@ namespace OSS.PaySdk.Wx
             XmlDocument resultXml = null;
             var dics = XmlDicHelper.ChangXmlToDir(contentStr, ref resultXml);
 
-            T t = new T {RespXml = resultXml};
+            var t = new T {RespXml = resultXml};
             t.FromResContent(dics);
 
             if (dics.ContainsKey("sign"))
@@ -132,21 +134,21 @@ namespace OSS.PaySdk.Wx
 
                 if (signStr != t.sign)
                 {
-                    t.Ret = (int)ResultTypes.ParaNotMeet;
-                    t.Message = "返回的结果签名（sign）不匹配";
+                    t.ret = (int)ResultTypes.ParaError;
+                    t.message = "返回的结果签名（sign）不匹配";
                 }
             }
 
             if (t.return_code.ToUpper() != "SUCCESS")
             {
-                //通信结果处理，这个其实没意义，脱裤子放屁
-                t.Ret = 0;
-                t.Message = t.return_msg;
+                //通信结果处理，这个微信做的其实没意义，脱裤子放屁
+                t.ret = -1;
+                t.message = t.return_msg;
             }
-            else if (!t.IsSuccess)
+            else if (!t.IsSuccess())
             {
                 //  请求数据结果处理
-                t.Message = GetErrMsg(t.err_code?.ToUpper());
+                t.message = GetErrMsg(t.err_code?.ToUpper());
             }
 
             return t;
@@ -171,10 +173,12 @@ namespace OSS.PaySdk.Wx
             CompleteDicSign(xmlDirs);
             dirformat?.Invoke(xmlDirs);
 
-            var req = new OsHttpRequest();
-            req.HttpMothed = HttpMothed.POST;
-            req.AddressUrl = addressUrl;
-            req.CustomBody = xmlDirs.ProduceXml();
+            var req = new OsHttpRequest
+            {
+                HttpMothed = HttpMothed.POST,
+                AddressUrl = addressUrl,
+                CustomBody = xmlDirs.ProduceXml()
+            };
 
             return await RestCommonAsync<T>(req, funcFormat,client);
         }
@@ -185,7 +189,7 @@ namespace OSS.PaySdk.Wx
         /// <param name="xmlDirs"></param>
         protected internal void CompleteDicSign(SortedDictionary<string, object> xmlDirs)
         {
-            string encStr = string.Join("&",
+            var encStr = string.Join("&",
                 xmlDirs.Select(
                     k =>
                     {
@@ -194,7 +198,7 @@ namespace OSS.PaySdk.Wx
                             ? string.Empty
                             : string.Concat(k.Key, "=", str);
                     }));
-            string sign = GetSign(encStr);// Md5.EncryptHexString(string.Concat(encStr, "&key=", ApiConfig.Key)).ToUpper();
+            var sign = GetSign(encStr);// Md5.EncryptHexString(string.Concat(encStr, "&key=", ApiConfig.Key)).ToUpper();
             xmlDirs.Add("sign", sign);
         }
 
@@ -281,12 +285,11 @@ namespace OSS.PaySdk.Wx
         /// <returns></returns>
         protected internal HttpClient GetCertHttpClient()
         {
-            if (_client==null)
-            {
-                var reqHandler = new HttpClientHandler();
-                ApiConfig.SetCertificata?.Invoke(reqHandler,new X509Certificate2(ApiConfig.CertPath,ApiConfig.CertPassword));
-                _client = new HttpClient(reqHandler);
-            }
+            if (_client != null) return _client;
+
+            var reqHandler = new HttpClientHandler();
+            ApiConfig.SetCertificata?.Invoke(reqHandler,new X509Certificate2(ApiConfig.CertPath,ApiConfig.CertPassword));
+            _client = new HttpClient(reqHandler);
             return _client;
         }
 

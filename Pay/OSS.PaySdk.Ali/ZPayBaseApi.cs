@@ -23,9 +23,8 @@ using Newtonsoft.Json.Linq;
 using OSS.Common.ComModels;
 using OSS.Common.ComModels.Enums;
 using OSS.Common.Extention;
-using OSS.Common.Modules;
+using OSS.Common.Plugs;
 using OSS.Common.Plugs.LogPlug;
-using OSS.Http;
 using OSS.Http.Extention;
 using OSS.Http.Mos;
 using OSS.PaySdk.Ali.SysTools;
@@ -38,8 +37,9 @@ namespace OSS.PaySdk.Ali
     public abstract class ZPayBaseApi
     {
         #region  配置信息部分
+
         private readonly ZPayRsaAssist m_RsaAssist;
-        
+
         /// <summary>
         ///   默认配置信息，如果实例中的配置为空会使用当前配置信息
         /// </summary>
@@ -70,7 +70,7 @@ namespace OSS.PaySdk.Ali
         /// <summary>
         /// 支付宝api接口地址
         /// </summary>
-        protected const string m_ApiUrl = "https://openapi.alipaydev.com/gateway.do";
+        protected const string m_ApiUrl = "https://openapi.alipay.com/gateway.do";
 
         /// <summary>
         /// 处理远程请求方法，并返回需要的实体
@@ -107,12 +107,12 @@ namespace OSS.PaySdk.Ali
                         if (resJsonObj == null)
                             return new T()
                             {
-                                Ret = (int) ResultTypes.ObjectStateError,
-                                Message = "基础请求响应不正确，请检查地址或者网络是否正常！"
+                                ret = (int) ResultTypes.ObjectStateError,
+                                message = "基础请求响应不正确，请检查地址或者网络是否正常！"
                             };
 
                         t = resJsonObj[respColumnName].ToObject<T>();
-                        if (t.IsSuccess)
+                        if (t.IsSuccess())
                         {
                             var sign = resJsonObj["sign"].ToString();
                             var signContent = GetCehckSignContent(respColumnName, contentStr);
@@ -120,7 +120,7 @@ namespace OSS.PaySdk.Ali
                             CheckSign(signContent, sign, t);
                         }
                         else
-                            t.Message = string.Concat(t.msg, "-", t.sub_msg);
+                            t.message = string.Concat(t.msg, "-", t.sub_msg);
                     }
                 }
             }
@@ -130,8 +130,8 @@ namespace OSS.PaySdk.Ali
                     ModuleNames.SocialCenter);
                 t = new T()
                 {
-                    Ret = (int) ResultTypes.InnerError,
-                    Message = string.Concat("基类请求出错，请检查网络是否正常，错误码：", logCode)
+                    ret = (int) ResultTypes.InnerError,
+                    message = string.Concat("基类请求出错，请检查网络是否正常，错误码：", logCode)
                 };
             }
             return t;
@@ -150,33 +150,34 @@ namespace OSS.PaySdk.Ali
             where TResp : ZPayBaseResp, new()
             where TReq : ZPayBaseReq
         {
-           var contentDirs=GetReqBodyDics(apiMethod, req);
-            if (!contentDirs.IsSuccess)
+            var contentDirs = GetReqBodyDics(apiMethod, req);
+            if (!contentDirs.IsSuccess())
                 return contentDirs.ConvertToResult<TResp>();
 
             var reqHttp = new OsHttpRequest();
 
             reqHttp.HttpMothed = HttpMothed.POST;
-            reqHttp.CustomBody = ConvertDicToEncodeReqBody(contentDirs.Data);
+            reqHttp.CustomBody = ConvertDicToEncodeReqBody(contentDirs.data);
 
             return await RestCommonAsync<TResp>(reqHttp, respColumnName);
         }
 
 
         #region 验证返回签名部分
-            /// <summary>
-            ///  返回结果验签
-            /// </summary>
-            /// <typeparam name="T"></typeparam>
-            /// <param name="signContent"></param>
-            /// <param name="sign"></param>
-            /// <param name="t"></param>
+
+        /// <summary>
+        ///  返回结果验签
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="signContent"></param>
+        /// <param name="sign"></param>
+        /// <param name="t"></param>
         protected void CheckSign<T>(string signContent, string sign, T t)
             where T : ResultMo, new()
         {
             try
             {
-                var checkSignRes = m_RsaAssist.CheckSign(signContent,sign);
+                var checkSignRes = m_RsaAssist.CheckSign(signContent, sign);
                 if (!checkSignRes)
                 {
                     if (!string.IsNullOrEmpty(signContent) &&
@@ -189,23 +190,24 @@ namespace OSS.PaySdk.Ali
 
                     if (checkSignRes) return;
 
-                    t.Ret = (int) ResultTypes.UnAuthorize;
-                    t.Message = "当前签名非法！";
+                    t.ret = (int) ResultTypes.UnAuthorize;
+                    t.message = "当前签名非法！";
                 }
 
             }
             catch (Exception e)
             {
-                t.Ret = (int) ResultTypes.InnerError;
-                t.Message = "解密签名过程中出错，详情请查看日志";
-                LogUtil.Info($"解密签名过程中出错，解密内容：{signContent}, 待验证签名：{sign}, 签名类型：{ApiConfig.SignType},  错误信息：{e.Message}",
+                t.ret = (int) ResultTypes.InnerError;
+                t.message = "解密签名过程中出错，详情请查看日志";
+                LogUtil.Info(
+                    $"解密签名过程中出错，解密内容：{signContent}, 待验证签名：{sign}, 签名类型：{ApiConfig.SignType},  错误信息：{e.Message}",
                     "CheckSign", ModuleNames.PayCenter);
 #if DEBUG
                 throw e;
 #endif
             }
         }
-        
+
         /// <summary>
         ///  获取需要验签的内容部分
         /// </summary>
@@ -219,7 +221,8 @@ namespace OSS.PaySdk.Ali
             var signContent = contentStr.Substring(startIndex, endIndex - startIndex);
             return signContent;
         }
-#endregion
+
+        #endregion
 
         #region 补充相关属性并签名
 
@@ -247,7 +250,7 @@ namespace OSS.PaySdk.Ali
                 SetDefaultPropertyFormat(dirs, "version", ApiConfig.Version);
 
                 SetDefaultPropertyFormat(dirs, "biz_content",
-                    JsonConvert.SerializeObject(req, Formatting.Indented, new JsonSerializerSettings()
+                    JsonConvert.SerializeObject(req, Formatting.None, new JsonSerializerSettings()
                     {
                         NullValueHandling = NullValueHandling.Ignore,
                         DefaultValueHandling = DefaultValueHandling.Ignore,
@@ -264,8 +267,8 @@ namespace OSS.PaySdk.Ali
             }
             catch (Exception e)
             {
-                LogUtil.Error(string.Concat("处理签名字典出错，详细信息：",e.Message), "Z_GetReqBodyDics",ModuleNames.PayCenter);
-                return new ResultMo<IDictionary<string, string>>((int)ResultTypes.InnerError,"处理签名字典出错，详细信息请查看日志");
+                LogUtil.Error(string.Concat("处理签名字典出错，详细信息：", e.Message), "Z_GetReqBodyDics", ModuleNames.PayCenter);
+                return new ResultMo<IDictionary<string, string>>((int) ResultTypes.InnerError, "处理签名字典出错，详细信息请查看日志");
             }
             return new ResultMo<IDictionary<string, string>>(dirs);
         }
